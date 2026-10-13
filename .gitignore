@@ -1,5 +1,17 @@
-build
-!.vscode/*
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Altium generated / backup files
+History/
+Project Logs for */
+Project Outputs for */
+__Previews/
+*.PrjPcbStructure
+*.WAS
+~$*
+.~lock*
 
 # Claude Code
 .claude/
