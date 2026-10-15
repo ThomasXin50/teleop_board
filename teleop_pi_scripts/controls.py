@@ -12,6 +12,8 @@ ARM = "start"          # Start / Options / +
 DISARM = "east"        # B (Xbox) / Circle (PS) / A (Nintendo) - right face button
 LIMIT_UP = "dpad_up"
 LIMIT_DOWN = "dpad_down"
+# Bench firmware only: toggles the clutches. Back / Share / - (select button).
+CLUTCH = "select"
 
 STICK_DEADZONE = 0.08
 TRIGGER_DEADZONE = 0.05
@@ -22,6 +24,15 @@ ARM_MAX_THROTTLE = TRIGGER_DEADZONE
 # input cuts throttle.
 BRAKE_CUTS_THROTTLE_PERCENT = 5.0
 MAX_BRAKE_PERCENT = 100.0
+
+# Vibration cues shared by the gamepad readers: (milliseconds, strength 0..1)
+# pulses, RUMBLE_GAP_S apart.
+RUMBLE_PATTERNS = {
+    "ready": ((150, 0.5), (150, 0.5)),  # connected and the RP2040 accepts commands
+    "arm": ((400, 1.0),),
+    "disarm": ((150, 0.35),),
+}
+RUMBLE_GAP_S = 0.15
 
 
 @dataclass(frozen=True)
@@ -82,6 +93,9 @@ class ControlMapper:
         self.steer_sign = -1.0 if invert_steering else 1.0
         self.speed_limit = min(1.0, max_speed)
         self.armed = False
+        # Clutch request for the bench firmware, toggled by CLUTCH. Starts
+        # engaged, which is what the firmware does on the first command.
+        self.clutches_engaged = True
         self._previous_buttons: frozenset = frozenset()
 
     def disarm(self) -> None:
@@ -106,6 +120,8 @@ class ControlMapper:
             self.speed_limit = min(self.max_speed, self.speed_limit + self.speed_step)
         if LIMIT_DOWN in pressed:
             self.speed_limit = max(self.speed_step, self.speed_limit - self.speed_step)
+        if CLUTCH in pressed:
+            self.clutches_engaged = not self.clutches_engaged
 
         # Positive steering angle is a left turn (see ackermann.c), and pushing
         # the stick left gives a negative X.

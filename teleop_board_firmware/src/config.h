@@ -118,13 +118,16 @@
 #define STEPPER_RATE_LIMIT_HZ \
     ((BENCH_MODE && BENCH_STEER_MAX_STEPS_PER_S > (float)STEPPER_MAX_HZ) \
         ? BENCH_STEER_MAX_STEPS_PER_S : (float)STEPPER_MAX_HZ)
-#define STEPPER_MIN_HZ          1u
+// Rates below this stop the axis. The step PWM can't go slower than
+// clk_sys / (255 * 65536) = 7.5 Hz at 125 MHz, so lower rates would step
+// faster than commanded (and than the no-progress check counts).
+#define STEPPER_MIN_HZ          8u
 #define STEPPER_PULSE_WIDTH_US  5u      // DM542T-compatible conservative pulse
 #define STEPPER_DIR_SETUP_US    10u
 // DM542T inputs are optocouplers. Wired common-anode: PUL+/DIR+/ENA+ tie to
-// +5 V and the GPIOs drive PUL-/DIR-/ENA- directly, so an opto conducts while
-// its GPIO is LOW. Set to 0 if the GPIOs drive the + side (common-cathode) or
-// sink through an inverting transistor stage.
+// +5 V and PUL-/DIR-/ENA- are driven by U7 (SN74AHCT244, non-inverting, 5 V)
+// from GPIO10-15, so an opto conducts while its GPIO is LOW. Set to 0 if the
+// GPIOs drive the + side (common-cathode) or sink through an inverting stage.
 #define STEPPER_INPUTS_COMMON_ANODE 1u
 // PUL idles with the opto off; each step is one opto-on half period.
 #define STEPPER_STEP_IDLE_LEVEL (STEPPER_INPUTS_COMMON_ANODE ? 1u : 0u)
@@ -275,6 +278,7 @@ static inline float speed_mph_to_pwm_percent(float speed_mph) {
 
 #define PROTO_CMD_PAYLOAD       6u  // int16 centidegrees, uint16 centi-mph, uint16 centi-percent brake
 #define PROTO_FAILSAFE_PAYLOAD  1u  // uint8 reason (1 = operator controller lost)
+#define PROTO_CLUTCH_PAYLOAD    1u  // uint8 0 = release, 1 = engage (bench firmware only)
 #define PROTO_TELEMETRY_PAYLOAD 20u
 #define PROTO_MAX_PAYLOAD       PROTO_TELEMETRY_PAYLOAD
 #define PROTO_MAX_FRAME         (PROTO_MAX_PAYLOAD + 11u)

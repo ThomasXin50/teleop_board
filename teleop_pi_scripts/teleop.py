@@ -25,11 +25,12 @@ TELEMETRY_LOST_S = 1.0
 GAMEPAD_HELP = [
     "Right trigger: throttle   Left stick: steer   Left trigger: brake (overrides throttle)",
     "Start: arm (throttle released)   B/Circle: disarm   D-pad up/down: speed limit",
-    "Keyboard: SPACE disarm   Q quit",
+    "Back/Share: toggle clutches (bench firmware)   Keyboard: SPACE disarm   Q quit",
 ]
 KEYBOARD_HELP = [
     "Up/W faster  Down/S slower  Left/A Right/D steer  C center",
     "B brake +10%  V brake -10%  SPACE stop (speed 0, full brake)  Q quit",
+    "K toggle clutches (bench firmware)",
 ]
 
 
@@ -48,6 +49,7 @@ def format_telemetry(t: protocol.Telemetry) -> list[str]:
         f"throttle  {t.throttle_percent:7.2f} %",
         f"rpm       FL {t.rpm_front_left:5d}  FR {t.rpm_front_right:5d}  "
         f"BL {t.rpm_back_left:5d}  BR {t.rpm_back_right:5d}",
+        f"clutches  {'ENGAGED' if t.clutches_engaged else 'released'}",
         f"command   {'ACTIVE' if t.command_active else 'inactive'}"
         + (("   FAILSAFE BRAKING (" + ("requested by client" if t.failsafe_requested
                                           else "commands timed out") + ")")
@@ -86,10 +88,13 @@ class KeyboardInput:
         self.speed = 0.0
         self.brake = 0.0
         self.steer_sign = -1.0 if args.invert_steering else 1.0
+        self.clutches_engaged = True  # bench firmware only, toggled with K
 
     def update(self, key: int, curses) -> Command:
         args = self.args
-        if key in (curses.KEY_UP, ord("w"), ord("W")):
+        if key in (ord("k"), ord("K")):
+            self.clutches_engaged = not self.clutches_engaged
+        elif key in (curses.KEY_UP, ord("w"), ord("W")):
             self.speed += args.speed_step
         elif key in (curses.KEY_DOWN, ord("s"), ord("S")):
             self.speed -= args.speed_step
@@ -134,6 +139,10 @@ class GamepadInput:
         if key == ord(" "):
             self.mapper.disarm()
         return self.mapper.update(self.pad.state())
+
+    @property
+    def clutches_engaged(self) -> bool:
+        return self.mapper.clutches_engaged
 
     def stop(self) -> None:
         self.mapper.disarm()
@@ -185,6 +194,9 @@ def run_teleop(link: VehicleLink, args: argparse.Namespace, source) -> int:
                 link.request_failsafe(protocol.FAILSAFE_REASON_CONTROLLER_LOST)
             else:
                 link.set_command(steering, speed, brake)
+            # Only the bench firmware takes clutch requests; never send them otherwise.
+            bench = telemetry is not None and telemetry.bench_mode
+            link.set_clutches(source.clutches_engaged if bench else None)
             source.feedback(telemetry is not None and not link_lost
                             and telemetry.command_active)
 
@@ -201,7 +213,9 @@ def run_teleop(link: VehicleLink, args: argparse.Namespace, source) -> int:
                          "ramps brake to 100%)")
             else:
                 put(row, f"target    steering {steering:+6.2f} deg   "
-                         f"speed {speed:5.2f} mph (max {args.max_speed:g})   brake {brake:5.1f} %")
+                         f"speed {speed:5.2f} mph (max {args.max_speed:g})   brake {brake:5.1f} %"
+                         + (f"   clutches {'ENGAGE' if source.clutches_engaged else 'RELEASE'}"
+                            if bench else ""))
             row += 2
             if link_lost:
                 put(row, "LINK LOST - no telemetry, speed held at 0", curses.A_REVERSE)
@@ -232,7 +246,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--port", help="serial device (default: auto-detect RP2040, "
                                        "else /dev/ttyACM0)")
     parser.add_argument("--input", choices=("gamepad", "keyboard"), default="gamepad")
-    parser.add_argument("--gamepad", help="evdev device, e.g. /dev/input/event3 "
+    parser.add_argument("--gamepad", help="evdev device, e.g. /dev/input/event3, or on "
+                                          "Windows an XInput slot 0-3 "
                                           "(default: first controller found)")
     parser.add_argument("--probe-gamepad", action="store_true",
                         help="print raw controller events and exit")
@@ -260,11 +275,19 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     return args
 
 
+def load_gamepad():
+    """The controller reader for this platform: evdev on the Pi, XInput on Windows."""
+    if sys.platform == "win32":
+        import gamepad_windows as gamepad
+    else:
+        import gamepad
+    return gamepad
+
+
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
     if args.probe_gamepad:
-        import gamepad
-        gamepad.probe(args.gamepad)
+        load_gamepad().probe(args.gamepad)
         return 0
     try:
         with VehicleLink(args.port, send_hz=args.rate,
@@ -274,8 +297,7 @@ def main(argv: list[str]) -> int:
             elif args.input == "keyboard":
                 result = run_teleop(link, args, KeyboardInput(args))
             else:
-                import gamepad
-                with gamepad.Gamepad(args.gamepad) as pad:
+                with load_gamepad().Gamepad(args.gamepad) as pad:
                     result = run_teleop(link, args, GamepadInput(args, pad))
             if link.error is not None:
                 print(f"serial link failed: {link.error}", file=sys.stderr)

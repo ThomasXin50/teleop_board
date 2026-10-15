@@ -64,6 +64,20 @@ class EncodeTest(unittest.TestCase):
         (crc,) = struct.unpack("<I", frame[8:])
         self.assertEqual(crc, firmware_crc32(frame[2:8]))
 
+    def test_clutch_layout(self):
+        for engaged, value in ((True, 1), (False, 0)):
+            frame = protocol.encode_clutch(0x0203, engaged)
+            self.assertEqual(frame[:7], bytes([0xA5, 0x5A, 3, 4, 1, 0x03, 0x02]))
+            self.assertEqual(frame[7], value)
+            (crc,) = struct.unpack("<I", frame[8:])
+            self.assertEqual(crc, firmware_crc32(frame[2:8]))
+
+    def test_clutch_status_bit(self):
+        payload = struct.pack("<hHHHHHHHHH", 0, 0, 0, 0, 0, 0, 0,
+                              protocol.STATUS_CLUTCHES_ENGAGED, 0, 0)
+        self.assertTrue(protocol.Telemetry.from_payload(1, payload).clutches_engaged)
+        self.assertFalse(protocol.Telemetry.from_payload(1, bytes(20)).clutches_engaged)
+
     def test_older_version_frames_rejected(self):
         body = struct.pack("<BBBH", 2, 2, 16, 9) + bytes(16)
         stale = protocol.MAGIC + body + struct.pack("<I", firmware_crc32(body))
@@ -131,6 +145,7 @@ class FakeFirmware:
         self.last_accept = None
         self.failsafe_requested = False
         self.accepted = []
+        self.clutch_requests = []
         self.failsafe_count = 0
         self.parser = protocol.FrameParser()
         self.is_open = False
@@ -157,6 +172,10 @@ class FakeFirmware:
             for frame in self.parser.feed(data):
                 seq = frame.sequence
                 if self.command_seen and not 0 < ((seq - self.last_sequence) & 0xFFFF) < 0x8000:
+                    continue
+                if frame.type == protocol.TYPE_CLUTCH:  # bench firmware rule
+                    self.last_sequence = seq
+                    self.clutch_requests.append(frame.payload[0])
                     continue
                 self.last_sequence, self.command_seen = seq, True
                 self.last_accept = time.monotonic()
@@ -186,7 +205,7 @@ class FakeFirmware:
 
 @unittest.skipIf(os.environ.get("SKIP_LINK_TESTS"), "link tests disabled")
 class LinkTest(unittest.TestCase):
-    def run_link(self, firmware, seconds, failsafe=False):
+    def run_link(self, firmware, seconds, failsafe=False, clutches=None):
         try:
             import link
         except ImportError as error:
@@ -195,6 +214,7 @@ class LinkTest(unittest.TestCase):
         vehicle._serial = firmware
         with vehicle:
             vehicle.set_command(5.0, 1.5, 20.0)
+            vehicle.set_clutches(clutches)
             if failsafe:
                 vehicle.request_failsafe(protocol.FAILSAFE_REASON_CONTROLLER_LOST)
             time.sleep(seconds)
@@ -209,6 +229,19 @@ class LinkTest(unittest.TestCase):
         self.assertIn((500, 150, 2000), firmware.accepted)
         self.assertEqual(firmware.accepted[-1], (500, 0, 2000),
                          "close() must send zero speed, keeping steering and brake")
+
+    def test_no_clutch_frames_unless_requested(self):
+        firmware = FakeFirmware(last_sequence=None)
+        self.run_link(firmware, 0.5)
+        self.assertEqual(firmware.clutch_requests, [])
+
+    def test_clutch_requests_stream_alongside_commands(self):
+        firmware = FakeFirmware(last_sequence=None)
+        vehicle, telemetry = self.run_link(firmware, 1.0, clutches=False)
+        self.assertTrue(telemetry.command_active, "clutch frames must not break the sequence")
+        self.assertEqual(vehicle.stats.resyncs, 0)
+        self.assertGreater(len(firmware.clutch_requests), 10)
+        self.assertEqual(set(firmware.clutch_requests), {0})
 
     def test_failsafe_request_streams_without_resync(self):
         firmware = FakeFirmware(last_sequence=None)

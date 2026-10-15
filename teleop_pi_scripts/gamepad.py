@@ -10,26 +10,21 @@ from typing import Optional
 import evdev
 from evdev import ecodes, ff
 
-from controls import ARM, DISARM, LIMIT_DOWN, LIMIT_UP, GamepadState
+from controls import (ARM, CLUTCH, DISARM, LIMIT_DOWN, LIMIT_UP, RUMBLE_GAP_S,
+                      RUMBLE_PATTERNS, GamepadState)
 
 BUTTONS = {
     ecodes.BTN_START: ARM,
     ecodes.BTN_EAST: DISARM,
     ecodes.BTN_DPAD_UP: LIMIT_UP,
     ecodes.BTN_DPAD_DOWN: LIMIT_DOWN,
+    ecodes.BTN_SELECT: CLUTCH,
 }
 # Controllers without analog triggers report them as buttons instead.
 DIGITAL_THROTTLE = ecodes.BTN_TR2
 DIGITAL_BRAKE = ecodes.BTN_TL2
 TRIGGER_AXES = (ecodes.ABS_Z, ecodes.ABS_RZ)
 RECONNECT_S = 1.0
-# Vibration cues: (milliseconds, strength 0..1) pulses, RUMBLE_GAP_S apart.
-RUMBLE_PATTERNS = {
-    "ready": ((150, 0.5), (150, 0.5)),  # connected and the RP2040 accepts commands
-    "arm": ((400, 1.0),),
-    "disarm": ((150, 0.35),),
-}
-RUMBLE_GAP_S = 0.15
 
 
 class UnsupportedController(Exception):

@@ -27,6 +27,8 @@
 #define VEHICLE_STATUS_FAILSAFE_REQUESTED  0x2000u
 // Bench build: throttle interlocks off, steering open loop (see BENCH_MODE).
 #define VEHICLE_STATUS_BENCH_MODE          0x4000u
+// The clutch outputs are driven to engaged.
+#define VEHICLE_STATUS_CLUTCHES_ENGAGED    0x8000u
 
 typedef struct {
 	float wheel_rpm[RPM_WHEEL_COUNT];

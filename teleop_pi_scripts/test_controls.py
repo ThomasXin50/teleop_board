@@ -4,7 +4,8 @@ import types
 import unittest
 from collections import namedtuple
 
-from controls import ARM, DISARM, LIMIT_DOWN, LIMIT_UP, ControlMapper, GamepadState, RumbleCues
+from controls import (ARM, CLUTCH, DISARM, LIMIT_DOWN, LIMIT_UP, ControlMapper, GamepadState,
+                      RumbleCues)
 
 
 def pad(steer=0.0, throttle=0.0, brake=0.0, buttons=(), connected=True):
@@ -77,6 +78,15 @@ class ControlMapperTest(unittest.TestCase):
         self.assertFalse(reconnected.failsafe)
         self.assertEqual(reconnected.speed_mph, 0.0, "must re-arm after reconnecting")
 
+    def test_clutch_button_toggles_once_per_press(self):
+        self.assertTrue(self.mapper.clutches_engaged)
+        for _ in range(3):
+            self.mapper.update(pad(buttons={CLUTCH}))
+        self.assertFalse(self.mapper.clutches_engaged, "holding the button toggles once")
+        self.mapper.update(pad())
+        self.mapper.update(pad(buttons={CLUTCH}))
+        self.assertTrue(self.mapper.clutches_engaged)
+
     def test_steering_direction_and_deadzone(self):
         self.assertEqual(self.mapper.update(pad(steer=0.05)).steering_deg, 0.0)
         self.assertAlmostEqual(self.mapper.update(pad(steer=-1.0)).steering_deg, 30.0)  # left = +deg
@@ -94,6 +104,7 @@ EV_KEY, EV_ABS, EV_FF = 1, 3, 0x15
 FF_RUMBLE = 0x50
 ABS_X, ABS_Z, ABS_RZ, ABS_HAT0Y = 0x00, 0x02, 0x05, 0x11
 BTN_SOUTH, BTN_EAST, BTN_TL2, BTN_TR2, BTN_START = 0x130, 0x131, 0x138, 0x139, 0x13B
+BTN_SELECT = 0x13A
 BTN_DPAD_UP, BTN_DPAD_DOWN = 0x220, 0x221
 
 
@@ -101,7 +112,7 @@ def install_fake_evdev():
     ecodes = types.SimpleNamespace(
         EV_KEY=EV_KEY, EV_ABS=EV_ABS, ABS_X=ABS_X, ABS_Z=ABS_Z, ABS_RZ=ABS_RZ,
         ABS_HAT0Y=ABS_HAT0Y, BTN_SOUTH=BTN_SOUTH, BTN_EAST=BTN_EAST, BTN_TL2=BTN_TL2,
-        BTN_TR2=BTN_TR2, BTN_START=BTN_START, BTN_DPAD_UP=BTN_DPAD_UP,
+        BTN_TR2=BTN_TR2, BTN_START=BTN_START, BTN_SELECT=BTN_SELECT, BTN_DPAD_UP=BTN_DPAD_UP,
         BTN_DPAD_DOWN=BTN_DPAD_DOWN, EV_FF=EV_FF, FF_RUMBLE=FF_RUMBLE,
         ABS={ABS_X: "ABS_X", ABS_Z: "ABS_Z", ABS_RZ: "ABS_RZ", ABS_HAT0Y: "ABS_HAT0Y"})
     module = types.ModuleType("evdev")
@@ -196,6 +207,8 @@ class GamepadReaderTest(unittest.TestCase):
             self.assertIn(LIMIT_UP, state.buttons)
             device.events += [Event(EV_KEY, BTN_START, 0), Event(EV_ABS, ABS_HAT0Y, 0)]
             state = self.wait_for(reader, lambda s: not s.buttons)
+            device.events.append(Event(EV_KEY, BTN_SELECT, 1))
+            self.wait_for(reader, lambda s: CLUTCH in s.buttons)
 
     def test_digital_triggers_fallback(self):
         axes = {ABS_X: AbsInfo(128, 0, 255, 0, 0, 0)}

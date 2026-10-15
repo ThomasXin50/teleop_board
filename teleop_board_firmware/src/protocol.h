@@ -13,6 +13,7 @@
 #define PROTO_TYPE_COMMAND  1u
 #define PROTO_TYPE_TELEMETRY 2u
 #define PROTO_TYPE_FAILSAFE  3u  // host asks for failsafe braking (payload: reason)
+#define PROTO_TYPE_CLUTCH    4u  // bench firmware only: engage/release the clutches
 #define PROTO_RX_CAPACITY   (PROTO_MAX_FRAME * 2u)
 
 typedef struct {

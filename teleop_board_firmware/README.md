@@ -21,13 +21,13 @@ All multi-byte values are little-endian. Each CDC stream frame is:
 | --- | ---: | --- |
 | 0 | 2 | Magic `A5 5A` |
 | 2 | 1 | Version, currently `3` |
-| 3 | 1 | Type: command `1`, telemetry `2`, failsafe request `3` |
+| 3 | 1 | Type: command `1`, telemetry `2`, failsafe request `3`, clutch `4` (bench firmware only) |
 | 4 | 1 | Payload byte length |
 | 5 | 2 | Sequence number |
 | 7 | N | Payload |
 | 7 + N | 4 | CRC-32/IEEE over bytes 2 through 6 + payload |
 
-Command payload (type 1, 6 bytes): signed `int16` steering-wheel angle in centidegrees, unsigned `uint16` target speed in centi-miles-per-hour, then unsigned `uint16` brake target in hundredths of a percent (0 released, 10000 fully applied). Failsafe request payload (type 3, 1 byte): `uint8` reason, currently `1` for operator controller lost; the firmware treats every reason the same. Commands and failsafe requests share one sequence counter.
+Command payload (type 1, 6 bytes): signed `int16` steering-wheel angle in centidegrees, unsigned `uint16` target speed in centi-miles-per-hour, then unsigned `uint16` brake target in hundredths of a percent (0 released, 10000 fully applied). Failsafe request payload (type 3, 1 byte): `uint8` reason, currently `1` for operator controller lost; the firmware treats every reason the same. Clutch payload (type 4, 1 byte): `uint8` `0` release, `1` engage; only the bench firmware acts on it (the vehicle firmware ignores it), it applies once a command has engaged the clutches, and it neither engages them by itself nor keeps the link alive. Commands, failsafe requests and clutch messages share one sequence counter.
 
 Send a message periodically; the link expires 500 ms after the last one. Both clutches are released at power-up and engage on the first valid message; after that they stay engaged until reset. The firmware enters **failsafe braking** when the link expires or while the host sends failsafe requests: throttle returns to zero, steering holds its position, and the brake target ramps from its current value to 100% over 1 s (`BRAKE_FAILSAFE_PERCENT`, `BRAKE_FAILSAFE_RAMP_US`). Normal control resumes with the next command. A brake target above 5% forces throttle to zero.
 
@@ -49,7 +49,8 @@ Telemetry is sent at 5 Hz (type 2, 20 bytes): signed steering angle in centidegr
 | 11 | Brake uncalibrated (`BRAKE_CALIBRATED` is 0; never stepped, and throttle is blocked) |
 | 12 | Host link active (a valid command or failsafe request within 500 ms) |
 | 13 | Failsafe requested by the host (latest message was type 3) |
-| 14 | Bench firmware (`BENCH_MODE`): throttle interlocks off, steering open loop |
+| 14 | Bench firmware (`BENCH_MODE`): throttle interlocks off, steering open loop, clutch messages honored |
+| 15 | Clutches engaged (outputs driven to engage) |
 
 The USB CDC link handles USB packet error detection and retry. The application frame adds stream resynchronization and CRC validation. Invalid frames are discarded.
 
@@ -57,7 +58,7 @@ The USB CDC link handles USB packet error detection and retry. The application f
 
 The values in `src/config.h` are starting assumptions, not calibrated vehicle parameters (see Calibration below). Confirm ADC wiring and sensor pin voltages, encoder pulses per revolution, steering travel and polarity, motor step angle and DM542T microstep switches, enable-input polarity, and the filtered throttle input range before enabling the mechanism. RP2040 ADC pins must never exceed 3.3 V. GPIO2 and GPIO3 output the same 25 kHz PWM duty for the RC-filtered, forward-only speed input.
 
-The DM542T inputs are wired common-anode: PUL+, DIR+, and ENA+ connect to +5 V and GPIO10–15 drive PUL-, DIR-, and ENA-, so each optocoupler conducts while its GPIO is low (`STEPPER_INPUTS_COMMON_ANODE` in `src/config.h`). PUL idles high and steps on the low half of each period; ENA- is driven high to enable a driver and low to disable it. Both drivers are enabled whenever the firmware runs, and also while the RP2040 is in reset or BOOTSEL (floating pins mean no ENA current), so the motors always hold position when not stepping. Reversing the DIR polarity flips the steering direction; verify it before closing the steering loop.
+The DM542T inputs are wired common-anode: PUL+, DIR+, and ENA+ connect to +5 V, and GPIO10–15 drive PUL-, DIR-, and ENA- through U7, a non-inverting SN74AHCT244 buffer powered from +5 V, so each optocoupler conducts while its GPIO is low (`STEPPER_INPUTS_COMMON_ANODE` in `src/config.h`). Set each DM542T's logic-level switch (S2 on drivers that have one) to 5 V. PUL idles high and steps on the low half of each period; ENA- is driven high to enable a driver and low to disable it. Both drivers are enabled whenever the firmware runs, so the motors hold position when not stepping. While the RP2040 is in reset or BOOTSEL its pins are pulled low, so the buffer drives every input on and both drivers are disabled (no holding torque, like the released clutches). Reversing the DIR polarity flips the steering direction; verify it before closing the steering loop.
 
 The clutch solenoids on GPIO4 and GPIO5 are driven through low-side MOSFETs (high engages) and are the only thing holding the steering wheel and brake pedal in position. They are released at power-up and during reset (including a watchdog reset), and engaged from the first valid command onward.
 

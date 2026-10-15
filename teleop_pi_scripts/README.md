@@ -50,7 +50,10 @@ direction, up to `BENCH_STEER_MAX_STEPS_PER_S` (500 steps/s, set in the
 firmware's `config.h`) at full stick; centered stops it. No travel limits. Teleop starts with
 a 10 mph ceiling and 1 mph D-pad steps: arm with Start, raise the limit with
 D-pad up, and the right trigger sets PWM duty (GPIO2/3 duty = speed / 10 mph).
-The screen shows `BENCH FIRMWARE`. Quitting (Q, Ctrl+C or an SSH drop)
+The screen shows `BENCH FIRMWARE`. Back/Share/- (or K on the keyboard)
+toggles the clutches; the `clutches` line shows what the firmware is driving.
+They engage with the first command as usual, and only the bench firmware
+accepts the toggle. Quitting (Q, Ctrl+C or an SSH drop)
 reflashes the normal firmware. Wheels off the ground, steering motor
 uncoupled, e-stop within reach; never drive on it.
 
@@ -104,6 +107,7 @@ mode) and Switch Pro controllers.
 | Start / Options / + | Arm. Only works with the right trigger released |
 | Right face button (B / Circle / Nintendo A) | Disarm: speed forced to 0 until re-armed |
 | D-pad up / down | Raise / lower speed limit by 0.25 mph (starts at 1 mph, max `--max-speed`) |
+| Back / Share / - | Bench firmware only: toggle the clutches (engaged ↔ released). Keyboard: K |
 | Keyboard SPACE / Q | Disarm / quit |
 
 Use `--invert-steering` if the wheels turn the wrong way. The client starts disarmed. It disarms automatically if the controller
@@ -147,3 +151,31 @@ speed 0 and full brake, Q quits.
 ```sh
 python3 -m unittest -v test_protocol test_controls test_telemetry test_bench
 ```
+
+## Running on Windows
+
+Everything above also runs on a Windows PC with the RP2040 plugged in over
+USB; the port (e.g. `COM4`) is auto-detected. One-time setup in PowerShell:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt   # adds windows-curses
+```
+
+Then use `.\.venv\Scripts\python.exe` in place of `python3`, e.g.
+`.\.venv\Scripts\python.exe teleop.py`. The controller is read through XInput
+(`gamepad_windows.py`): Xbox controllers and pads in X-input mode work as-is;
+PlayStation and Switch Pro controllers need Steam Input or DS4Windows.
+`--gamepad` takes an XInput slot (0-3) instead of a device path.
+
+The shell scripts have PowerShell versions (run with
+`powershell -ExecutionPolicy Bypass -File <script>` if scripts are blocked).
+They use the UF2s in `..\teleop_board_firmware\build\` by default:
+
+```powershell
+.\flash.ps1                 # or: .\flash.ps1 -Uf2 path\to\firmware.uf2
+.\bench_drive.ps1           # type BENCH; reflashes the normal firmware on quit
+```
+
+Quit `bench_drive.ps1` with Q or Ctrl+C; closing the window skips the restore,
+so run `.\flash.ps1` afterwards if that happens.

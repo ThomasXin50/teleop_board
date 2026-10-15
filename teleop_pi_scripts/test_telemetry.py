@@ -43,6 +43,12 @@ class TelemetryOutputTest(unittest.TestCase):
         self.assertIn("BENCH-MODE", telemetry.format_line(t))
         self.assertTrue(telemetry.telemetry_dict(t)["bench_mode"])
 
+    def test_clutch_state_is_shown(self):
+        engaged = self.sample(protocol.STATUS_CLUTCHES_ENGAGED)
+        self.assertIn("CLUTCHED", telemetry.format_line(engaged))
+        self.assertTrue(telemetry.telemetry_dict(engaged)["clutches_engaged"])
+        self.assertNotIn("CLUTCHED", telemetry.format_line(self.sample(0)))
+
 
 if __name__ == "__main__":
     unittest.main()

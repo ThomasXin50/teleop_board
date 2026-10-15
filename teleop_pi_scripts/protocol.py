@@ -6,7 +6,8 @@ fields are little-endian:
     offset  size  field
     0       2     magic A5 5A
     2       1     version (3)
-    3       1     type (1 = command, 2 = telemetry, 3 = failsafe request)
+    3       1     type (1 = command, 2 = telemetry, 3 = failsafe request,
+                  4 = clutch, bench firmware only)
     4       1     payload length
     5       2     sequence
     7       N     payload
@@ -26,6 +27,7 @@ VERSION = 3
 TYPE_COMMAND = 1
 TYPE_TELEMETRY = 2
 TYPE_FAILSAFE = 3
+TYPE_CLUTCH = 4  # bench firmware only; the vehicle firmware ignores it
 
 # Failsafe message reasons (informational; the firmware brakes the same way).
 FAILSAFE_REASON_CONTROLLER_LOST = 1
@@ -34,6 +36,7 @@ HEADER_SIZE = 7
 CRC_SIZE = 4
 CMD_PAYLOAD = 6
 FAILSAFE_PAYLOAD = 1
+CLUTCH_PAYLOAD = 1
 TELEMETRY_PAYLOAD = 20
 MAX_PAYLOAD = TELEMETRY_PAYLOAD  # firmware rejects anything longer
 
@@ -55,6 +58,7 @@ STATUS_BRAKE_UNCALIBRATED = 0x0800
 STATUS_HOST_LINK_ACTIVE = 0x1000     # any valid message within the timeout
 STATUS_FAILSAFE_REQUESTED = 0x2000   # latest message was a failsafe request
 STATUS_BENCH_MODE = 0x4000           # bench firmware: throttle interlocks off, steering open loop
+STATUS_CLUTCHES_ENGAGED = 0x8000     # clutch outputs driven to engage
 
 # Firmware clamps to these (config.h); the client clamps too so the UI
 # shows what the vehicle will actually do.
@@ -102,6 +106,13 @@ def encode_failsafe(sequence: int, reason: int) -> bytes:
     """Asks the firmware for failsafe braking (same as a comms timeout) while
     keeping the link alive. Shares the command sequence counter."""
     return encode_frame(TYPE_FAILSAFE, sequence, struct.pack("<B", reason & 0xFF))
+
+
+def encode_clutch(sequence: int, engaged: bool) -> bytes:
+    """Bench firmware only: engage or release the clutches (once a command has
+    engaged them). Doesn't keep the link alive. Shares the command sequence
+    counter."""
+    return encode_frame(TYPE_CLUTCH, sequence, struct.pack("<B", 1 if engaged else 0))
 
 
 @dataclass(frozen=True)
@@ -153,6 +164,10 @@ class Telemetry:
     @property
     def bench_mode(self) -> bool:
         return bool(self.status & STATUS_BENCH_MODE)
+
+    @property
+    def clutches_engaged(self) -> bool:
+        return bool(self.status & STATUS_CLUTCHES_ENGAGED)
 
     @property
     def faults(self) -> list[str]:

@@ -44,6 +44,10 @@ static bool failsafe_requested;
 static bool failsafe_active;
 static uint32_t failsafe_start_us;
 static float failsafe_start_brake;
+// Bench firmware only: clutch messages from the host can release the clutches
+// after the first command. Always true in the vehicle firmware.
+static bool clutches_requested = true;
+static bool clutches_engaged;
 
 static axis_t steering = {
 	.stepper = STEPPER_STEERING,
@@ -204,13 +208,22 @@ bool vehicle_accept_packet(const proto_packet_t *packet, uint32_t now_us) {
 	// a comms timeout. Its reason byte is informational.
 	const bool is_failsafe = packet->type == PROTO_TYPE_FAILSAFE
 						  && packet->length == PROTO_FAILSAFE_PAYLOAD;
-	if (!is_command && !is_failsafe) return false;
-	// Commands and failsafe messages share one sequence counter.
+	// Clutch messages are honored by the bench build only, and don't count as
+	// commands: they neither engage the clutches nor keep the link alive.
+	const bool is_clutch = BENCH_MODE
+						&& packet->type == PROTO_TYPE_CLUTCH
+						&& packet->length == PROTO_CLUTCH_PAYLOAD;
+	if (!is_command && !is_failsafe && !is_clutch) return false;
+	// Commands, failsafe and clutch messages share one sequence counter.
 	if (command_seen && (int16_t)(packet->sequence - last_command_sequence) <= 0) {
 		return false;
 	}
-	last_message_us = now_us;
 	last_command_sequence = packet->sequence;
+	if (is_clutch) {
+		clutches_requested = packet->payload[0] != 0u;
+		return true;
+	}
+	last_message_us = now_us;
 	command_seen = true;
 	failsafe_requested = is_failsafe;
 	if (is_failsafe) return true;
@@ -262,8 +275,10 @@ void vehicle_update(uint32_t now_us) {
 
 	// The clutches are the only thing holding the steering wheel and brake
 	// pedal. Released until the first command so both can be moved by hand;
-	// from then on engaged until reset, including after comms are lost.
-	hal_clutches_set(command_seen);
+	// from then on engaged until reset, including after comms are lost. The
+	// bench build can also release them on request (clutch messages).
+	clutches_engaged = command_seen && clutches_requested;
+	hal_clutches_set(clutches_engaged);
 
 	if (!command_active) {
 		state.target_speed_mph = 0.0f;
@@ -351,7 +366,8 @@ void vehicle_update(uint32_t now_us) {
 				 | brake.faults
 				 | (steering.calibrated ? 0u : VEHICLE_STATUS_STEER_UNCALIBRATED)
 				 | (brake.calibrated ? 0u : VEHICLE_STATUS_BRAKE_UNCALIBRATED)
-				 | (BENCH_MODE ? VEHICLE_STATUS_BENCH_MODE : 0u);
+				 | (BENCH_MODE ? VEHICLE_STATUS_BENCH_MODE : 0u)
+				 | (clutches_engaged ? VEHICLE_STATUS_CLUTCHES_ENGAGED : 0u);
 }
 
 const vehicle_state_t *vehicle_state(void) {

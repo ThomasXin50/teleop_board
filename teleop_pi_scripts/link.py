@@ -38,6 +38,7 @@ def find_port() -> Optional[str]:
 class LinkStats:
     commands_sent: int = 0
     failsafe_sent: int = 0
+    clutch_sent: int = 0
     resyncs: int = 0
     good_frames: int = 0
     bad_frames: int = 0
@@ -63,6 +64,7 @@ class VehicleLink:
         self._speed_mph = 0.0
         self._brake_percent = 0.0
         self._failsafe_reason: Optional[int] = None
+        self._clutches: Optional[bool] = None
         self._sequence = 0
         self._telemetry: Optional[protocol.Telemetry] = None
         self._telemetry_time = 0.0
@@ -119,6 +121,12 @@ class VehicleLink:
         with self._lock:
             self._failsafe_reason = reason
 
+    def set_clutches(self, engaged: Optional[bool]) -> None:
+        """Bench firmware only: also stream a clutch message (engage or release)
+        after each command. None stops sending them."""
+        with self._lock:
+            self._clutches = engaged
+
     def set_speed_zero(self) -> None:
         with self._lock:
             self._speed_mph = 0.0
@@ -140,6 +148,10 @@ class VehicleLink:
                 frame = protocol.encode_command(self._sequence, self._steering_deg,
                                                 self._speed_mph, self._brake_percent)
                 self.stats.commands_sent += 1
+            if self._clutches is not None:
+                self._sequence = (self._sequence + 1) & 0xFFFF
+                frame += protocol.encode_clutch(self._sequence, self._clutches)
+                self.stats.clutch_sent += 1
         self._serial.write(frame)
 
     def _send_loop(self) -> None:

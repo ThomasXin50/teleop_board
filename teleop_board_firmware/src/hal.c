@@ -114,7 +114,7 @@ void hal_stepper_set_rate(uint step_pin, uint dir_pin, float steps_per_second) {
 
     const bool direction = steps_per_second < 0.0f;
     const uint32_t rate = (uint32_t)fabsf(steps_per_second);
-    const bool direction_changed = gpio_get(dir_pin) != direction;
+    const bool direction_changed = gpio_get_out_level(dir_pin) != direction;
     if (direction_changed) {
         // Halt the pulse train so no step edge falls inside the DIR setup time.
         step_output_idle(step_pin);
@@ -122,7 +122,9 @@ void hal_stepper_set_rate(uint step_pin, uint dir_pin, float steps_per_second) {
         busy_wait_us(STEPPER_DIR_SETUP_US);
     }
 
-    if (step_pin < count_of(stepper_rates) && stepper_rates[step_pin] == rate) return;
+    const uint32_t previous_rate =
+        step_pin < count_of(stepper_rates) ? stepper_rates[step_pin] : 0u;
+    if (previous_rate == rate) return;
 
     const uint slice = pwm_gpio_to_slice_num(step_pin);
     const uint channel = pwm_gpio_to_channel(step_pin);
@@ -134,11 +136,26 @@ void hal_stepper_set_rate(uint step_pin, uint dir_pin, float steps_per_second) {
     if (period < 2u) period = 2u;
     if (period > 65536u) period = 65536u;
 
+    if (previous_rate != 0u) {
+        // Already stepping: change the rate without restarting the counter.
+        // TOP and CC are double-buffered and take effect at the next wrap, so
+        // the step in progress finishes normally. Re-initializing here (as on
+        // a start) would cut the period short on every control update, and at
+        // rates below twice the loop rate no step would ever be output.
+        pwm_set_clkdiv_int_frac(slice, (uint8_t)divider, 0u);
+        pwm_set_wrap(slice, (uint16_t)(period - 1u));
+        pwm_set_chan_level(slice, channel, (uint16_t)(period / 2u));
+        stepper_rates[step_pin] = rate;
+        return;
+    }
+
     pwm_config step_config = pwm_get_default_config();
-    pwm_config_set_clkdiv(&step_config, (float)divider);
+    pwm_config_set_clkdiv_int(&step_config, divider);
     pwm_config_set_wrap(&step_config, (uint16_t)(period - 1u));
     // The counter restarts at 0 and the output is high while counter < level,
-    // so each period starts high: the idle level when wired common-anode.
+    // so each period starts high: the idle level when wired common-anode. The
+    // pin stays on SIO (idle) until the slice is configured, so the reset
+    // values pwm_init() writes never reach the driver.
     pwm_init(slice, &step_config, false);
     pwm_set_chan_level(slice, channel, (uint16_t)(period / 2u));
     gpio_set_function(step_pin, GPIO_FUNC_PWM);

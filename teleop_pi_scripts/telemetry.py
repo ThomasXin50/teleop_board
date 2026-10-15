@@ -45,6 +45,7 @@ def telemetry_dict(t: protocol.Telemetry) -> dict:
         "brake_at_limit": t.brake_at_limit,
         "faults": t.faults,
         "bench_mode": t.bench_mode,
+        "clutches_engaged": t.clutches_engaged,
         "status": t.status,
     }
 
@@ -53,6 +54,8 @@ def format_line(t: protocol.Telemetry) -> str:
     flags = ["BENCH-MODE"] if t.bench_mode else []
     if t.command_active:
         flags.append("CMD")
+    if t.clutches_engaged:
+        flags.append("CLUTCHED")
     if t.failsafe_braking:
         flags.append("FAILSAFE")
     if not t.steer_sensor_ok:
